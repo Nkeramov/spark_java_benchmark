@@ -1,5 +1,8 @@
 package com.spark.java_benchmark;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -19,13 +22,14 @@ import java.util.function.Function;
 
 
 public class Main {
+	private static final Logger LOGGER = LogManager.getLogger(Main.class);
 	private static final String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss";
 	private static final String CSV_DELIMITER = ",";
 
 	private static final String CSV_PATH = "/home/nizam/opensky/";
 	private static final String PARQUET_PATH = "/home/nizam/opensky/opensky.parquet";
-	private static final int TEST_REPEAT_COUNT = 5;
-	private static final int TEST_TYPES_COUNT = 6;
+	private static final int TEST_REPEAT_COUNT = 10;
+	private static final int TEST_TYPES_COUNT = 5;
 	private static final int WINDOW_SIZE_IN_DAYS = 30;
 	private static final int DOUBLE_PRECISION = 5;
 	private static final int EARTH_RADIUS = 6371000;
@@ -39,9 +43,11 @@ public class Main {
 	 * @param outputPath - path to parquet files directory (output data)
 	 */
 	public static void preprocessParquetDataset(SparkSession spark, String inputPath, String outputPath) {
-		Map<String, String> optionsMap = new java.util.HashMap<>();
-		optionsMap.put("delimiter", CSV_DELIMITER);
-		optionsMap.put("header", "true");
+		Map<String, String> optionsMap = new HashMap<>() {{
+			put("delimiter", CSV_DELIMITER);
+			put("header", "true");
+			put("inferSchema", "true");
+		}};
 		Dataset<Row> opensky = spark.read().options(optionsMap).csv(inputPath)
 				.withColumn("firstseen", functions.to_date(functions.col("firstseen"), TIMESTAMP_FORMAT))
 				.withColumn("lastseen", functions.to_timestamp(functions.col("lastseen"), TIMESTAMP_FORMAT));
@@ -102,40 +108,43 @@ public class Main {
 		long cnt = df.count();
 		long finish = System.nanoTime();
 		long timeElapsed = (finish - start) / (long) 1e6;
-		return new HashMap<String, Long>() {{
+		return new HashMap<>() {{
 			put("time", timeElapsed);
 			put("count", cnt);
 		}};
 	}
 
 	public static void main(String[] args) {
+		System.setProperty("log4j2.configurationFile",
+				String.valueOf(Main.class.getClassLoader().getResource("log4j2.xml")));
+		LOGGER.info("Spark Java API benchmark");
+		LOGGER.info("Query list:");
+		LOGGER.info("\t1) reading with filtering");
+		LOGGER.info("\t2) reading with aggregation");
+		LOGGER.info("\t3) reading with aggregation and then filtering");
+		LOGGER.info("\t4) reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
+		LOGGER.info("\t5) reading and calculating the maximum of a complex function (with UDF) in a sliding window");
 		long[] testTimes = new long[TEST_TYPES_COUNT];
 		long start, finish, timeElapsed, cnt;
+		LOGGER.info(String.format("Number of repetitions of each query: %d", TEST_REPEAT_COUNT));
+		LOGGER.info("Dataset reading test started ...");
 		SparkSession spark = SparkSession.builder()
-			.appName("SparkJavaTest")
-			.master("local[4]")
-			.config("spark.executor.memory", "2g")
-			.getOrCreate();
+				.appName("SparkJavaTest")
+				.master("local[8]")
+				.config("spark.executor.memory", "2g")
+				.getOrCreate();
 		spark.sparkContext().setLogLevel("ERROR");
 		spark.sql("set spark.sql.files.ignoreCorruptFiles=true");
 		//preprocessParquetDataset(spark, csvPath, parquetPath);
-		System.out.println("Spark Java API benchmark");
-		System.out.println("Query list:");
-		System.out.println("\t1) reading with filtering");
-		System.out.println("\t2) reading with aggregation");
-		System.out.println("\t3) reading with aggregation and then filtering");
-		System.out.println("\t4) reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
-		System.out.println("\t5) reading and calculating the maximum of a complex function (with UDF) in a sliding window");
-		System.out.printf("Number of repetitions of each query: %d\n", TEST_REPEAT_COUNT);
-		System.out.println("Dataset reading test started ...");
 		start = System.nanoTime();
 		Dataset<Row> opensky = readParquetDataset(spark, PARQUET_PATH).persist();
 		cnt = opensky.count();
 		finish = System.nanoTime();
 		timeElapsed = (finish - start) / (long) 1e6;
-		System.out.printf("Elapsed time %s ms, selected %s records\n", withLargeIntegers(timeElapsed), withLargeIntegers(cnt));
-		System.out.println("Dataset schema");
-		opensky.printSchema();
+		LOGGER.info(String.format("Elapsed time %s ms, selected %s records", withLargeIntegers(timeElapsed), withLargeIntegers(cnt)));
+		LOGGER.info("Dataset schema");
+		LOGGER.info(opensky.schema().toString());
+//		opensky.printSchema();
 		spark.catalog().clearCache();
 		List<Function<Dataset<Row>, Dataset<Row>>> spark_queries = new ArrayList<>();
 		spark_queries.add(df -> df
@@ -220,21 +229,21 @@ public class Main {
 			.orderBy(functions.col("flightdate").asc()).persist()
 		);
 		for (int i = 0; i < TEST_REPEAT_COUNT; i++) {
-			System.out.printf("%d iteration\n", i + 1);
+			LOGGER.info(String.format("%d iteration", i + 1));
 			for(int j = 0; j < spark_queries.size(); j++){
 				Function<Dataset<Row>, Dataset<Row>> spark_query = spark_queries.get(j);
 				HashMap<String, Long> res = measureTime(spark, PARQUET_PATH, spark_query);
-				System.out.printf("\t%d-st query: elapsed time %s ms, selected %s records\n", j + 1,
-						withLargeIntegers(res.get("time")), withLargeIntegers(res.get("count")));
+				LOGGER.info(String.format("\t%d-st query: elapsed time %s ms, selected %s records", j + 1,
+						withLargeIntegers(res.get("time")), withLargeIntegers(res.get("count"))));
 				testTimes[j] += res.get("time");
 			}
 		}
-		System.out.println("\nSUMMARY");
+		LOGGER.info("SUMMARY");
 		for (int i = 0; i < testTimes.length; i++) {
 			testTimes[i] = Math.round((double) testTimes[i] / TEST_REPEAT_COUNT);
-			System.out.printf("\t %d) %s ms\n", i + 1, withLargeIntegers(testTimes[i]));
+			LOGGER.info(String.format("\t %d) %s ms", i + 1, withLargeIntegers(testTimes[i])));
 		}
-		System.out.print("All tests completed successfully");
+		LOGGER.info("All tests completed successfully");
 		spark.stop();
 	}
 }
