@@ -144,7 +144,7 @@ public class Main {
 		LOGGER.info(String.format("Elapsed time %s ms, selected %s records", withLargeIntegers(timeElapsed), withLargeIntegers(cnt)));
 		LOGGER.info("Dataset schema");
 		LOGGER.info(opensky.schema().toString());
-//		opensky.printSchema();
+		//opensky.printSchema();
 		spark.catalog().clearCache();
 		List<Function<Dataset<Row>, Dataset<Row>>> spark_queries = new ArrayList<>();
 		spark_queries.add(df -> df
