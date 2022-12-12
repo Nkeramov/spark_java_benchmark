@@ -32,7 +32,7 @@ public class Main {
 	private static final int TEST_TYPES_COUNT = 5;
 	private static final int WINDOW_SIZE_IN_DAYS = 30;
 	private static final int DOUBLE_PRECISION = 5;
-	private static final int EARTH_RADIUS = 6371000;
+	private static final int EARTH_RADIUS = 6_371_000;
 	private static final double DEG2RAD = 180 / Math.PI;
 
 	/**
@@ -65,10 +65,10 @@ public class Main {
 
 	/**
 	 * readParquetDataset - read dataset from parquet files,
-	 * selects columns (origin, destination, firstseen, latitude_1, longitude_1, latitude_2, longitude_2),
+	 * selects columns (origin, destination, firstseen, lastseen, latitude_1, longitude_1, latitude_2, longitude_2),
 	 * filters rows with nulls
-	 * converts firstseen, lastseen columns to timestamp type
-	 * converts latitude_1, longitude_1, latitude_2, longitude_2 columns to double type,
+	 * casts columns firstseen, lastseen to timestamp type
+	 * casts columns latitude_1, longitude_1, latitude_2, longitude_2 to double type,
 	 * @param spark - current spark session
 	 * @param path - path to parquet files directory (input data)
 	 * @return dataframe with selected rows
@@ -87,8 +87,8 @@ public class Main {
 				.filter(functions.col("longitude_1").isNotNull())
 				.filter(functions.col("latitude_2").isNotNull())
 				.filter(functions.col("longitude_2").isNotNull())
-				.withColumn("firstseen", functions.to_timestamp(functions.col("firstseen"), "yyyy-MM-dd HH:mm:ss"))
-				.withColumn("lastseen", functions.to_timestamp(functions.col("lastseen"), "yyyy-MM-dd HH:mm:ss"))
+				.withColumn("firstseen", functions.to_timestamp(functions.col("firstseen"), TIMESTAMP_FORMAT))
+				.withColumn("lastseen", functions.to_timestamp(functions.col("lastseen"), TIMESTAMP_FORMAT))
 				.withColumn("latitude_1", functions.col("latitude_1").cast(DataTypes.DoubleType))
 				.withColumn("longitude_1", functions.col("longitude_1").cast(DataTypes.DoubleType))
 				.withColumn("latitude_2", functions.col("latitude_2").cast(DataTypes.DoubleType))
@@ -100,17 +100,24 @@ public class Main {
 		return df.format(value);
 	}
 
-	public static HashMap<String, Long> measureTime(SparkSession spark, String parquetPath,
-													Function<Dataset<Row>, Dataset<Row>> func) {
+	/**
+	 * measureQueryExecutionTime - measures query execution time
+	 * @param spark - current spark session
+	 * @param parquetPath - path to parquet files directory (input data)
+	 * @param func - query applied to a dataset
+	 * @return hashmap with query execution time and number of records in the query result dataframe
+	 */
+	public static HashMap<String, Long> measureQueryExecutionTime(SparkSession spark, String parquetPath,
+																  Function<Dataset<Row>, Dataset<Row>> func) {
 		spark.catalog().clearCache();
 		long start = System.nanoTime();
 		Dataset<Row> df = func.apply(readParquetDataset(spark, parquetPath));
-		long cnt = df.count();
+		long recordsCount = df.count();
 		long finish = System.nanoTime();
-		long timeElapsed = (finish - start) / (long) 1e6;
+		long executionTime = (finish - start) / (long) 1e6;
 		return new HashMap<>() {{
-			put("time", timeElapsed);
-			put("count", cnt);
+			put("execution_time", executionTime);
+			put("records_count", recordsCount);
 		}};
 	}
 
@@ -125,23 +132,23 @@ public class Main {
 		LOGGER.info("\t4) reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
 		LOGGER.info("\t5) reading and calculating the maximum of a complex function (with UDF) in a sliding window");
 		long[] testTimes = new long[TEST_TYPES_COUNT];
-		long start, finish, timeElapsed, cnt;
+		long start, finish, executionTime, recordsCount;
 		LOGGER.info(String.format("Number of repetitions of each query: %d", TEST_REPEAT_COUNT));
 		LOGGER.info("Dataset reading test started ...");
 		SparkSession spark = SparkSession.builder()
+				.config("spark.sql.files.ignoreCorruptFiles", "true")
 				.appName("SparkJavaTest")
 				.master("local[8]")
 				.config("spark.executor.memory", "2g")
 				.getOrCreate();
 		spark.sparkContext().setLogLevel("ERROR");
-		spark.sql("set spark.sql.files.ignoreCorruptFiles=true");
 		//preprocessParquetDataset(spark, csvPath, parquetPath);
 		start = System.nanoTime();
 		Dataset<Row> opensky = readParquetDataset(spark, PARQUET_PATH).persist();
-		cnt = opensky.count();
+		recordsCount = opensky.count();
 		finish = System.nanoTime();
-		timeElapsed = (finish - start) / (long) 1e6;
-		LOGGER.info(String.format("Elapsed time %s ms, selected %s records", withLargeIntegers(timeElapsed), withLargeIntegers(cnt)));
+		executionTime = (finish - start) / (long) 1e6;
+		LOGGER.info(String.format("Elapsed time %s ms, selected %s records", withLargeIntegers(executionTime), withLargeIntegers(recordsCount)));
 		LOGGER.info("Dataset schema");
 		LOGGER.info(opensky.schema().toString());
 		//opensky.printSchema();
@@ -232,10 +239,12 @@ public class Main {
 			LOGGER.info(String.format("%d iteration", i + 1));
 			for(int j = 0; j < spark_queries.size(); j++){
 				Function<Dataset<Row>, Dataset<Row>> spark_query = spark_queries.get(j);
-				HashMap<String, Long> res = measureTime(spark, PARQUET_PATH, spark_query);
+				HashMap<String, Long> res = measureQueryExecutionTime(spark, PARQUET_PATH, spark_query);
+				executionTime = res.getOrDefault("execution_time", 0L);
+				recordsCount = res.getOrDefault("records_count", 0L);
 				LOGGER.info(String.format("\t%d-st query: elapsed time %s ms, selected %s records", j + 1,
-						withLargeIntegers(res.get("time")), withLargeIntegers(res.get("count"))));
-				testTimes[j] += res.get("time");
+						withLargeIntegers(executionTime), withLargeIntegers(recordsCount)));
+				testTimes[j] += executionTime;
 			}
 		}
 		LOGGER.info("SUMMARY");
