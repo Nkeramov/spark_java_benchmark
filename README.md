@@ -62,7 +62,7 @@ Used 5 queries:
 4. Reading and adding a calculated column using a window function. Calculation of distance between airports of departure and arrival. Grouping by date of flight and calculating the maximum distance for the last 30 days from the date of flight.
 5. The same as the 4th request. Only using a UDF.
 
-The measureTime method executes reads the dataset and executes the query. Method returns the query execution time and the number of records.
+The measureQueryTime method executes reads the dataset and executes the query. Method returns the query execution time and the number of records.
 
 ## Test methodology
 
