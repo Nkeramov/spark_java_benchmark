@@ -127,14 +127,6 @@ public class Main {
 		DecimalFormat decimalFormat = new DecimalFormat("###,###.#");
 		System.setProperty("log4j2.configurationFile",
 				String.valueOf(Main.class.getClassLoader().getResource("log4j2.xml")));
-		LOGGER.info("Spark Java API benchmark");
-		LOGGER.info("Query list:");
-		LOGGER.info("\t1) reading with filtering");
-		LOGGER.info("\t2) reading with aggregation");
-		LOGGER.info("\t3) reading with aggregation and then filtering");
-		LOGGER.info("\t4) reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
-		LOGGER.info("\t5) reading and calculating the maximum of a complex function (with UDF) in a sliding window");
-		LOGGER.info(String.format("Number of repetitions of each query: %d", TEST_REPEAT_COUNT));
 		SparkSession spark = SparkSession.builder()
 				.config("spark.sql.files.ignoreCorruptFiles", "true")
 				.appName("SparkJavaTest")
@@ -143,6 +135,14 @@ public class Main {
 				.getOrCreate();
 		spark.sparkContext().setLogLevel("ERROR");
 		if (Files.isDirectory(Paths.get(CSV_PATH))) {
+			LOGGER.info("Spark Java API benchmark");
+			LOGGER.info("Query list:");
+			LOGGER.info("1: reading with filtering");
+			LOGGER.info("2: reading with aggregation");
+			LOGGER.info("3: reading with aggregation and then filtering");
+			LOGGER.info("4: reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
+			LOGGER.info("5: reading and calculating the maximum of a complex function (with UDF) in a sliding window");
+			LOGGER.info(String.format("Number of repetitions of each query: %d", TEST_REPEAT_COUNT));
 			if (!Files.isDirectory(Paths.get(PARQUET_PATH))) {
 				LOGGER.info("Dataset preprocessing started ...");
 				createParquetDataset(spark, CSV_PATH, PARQUET_PATH);
@@ -236,7 +236,7 @@ public class Main {
 					res = measureQueryExecutionTime(spark, PARQUET_PATH, spark_query);
 					executionTime = res.getOrDefault("execution_time", 0L);
 					rowCount = res.getOrDefault("row_count", 0L);
-					LOGGER.info(String.format("\t%d-st query: elapsed time %s sec, selected %s rows", j + 1,
+					LOGGER.info(String.format("\t%d: elapsed time %s sec, selected %s rows", j + 1,
 							decimalFormat.format(executionTime), decimalFormat.format(rowCount)));
 					executionTimes[j] += executionTime;
 				}
@@ -244,7 +244,7 @@ public class Main {
 			LOGGER.info("Average query execution time");
 			for (int i = 0; i < executionTimes.length; i++) {
 				executionTimes[i] = round((double) executionTimes[i] / TEST_REPEAT_COUNT);
-				LOGGER.info(String.format("\t%d-st query %s sec", i + 1, decimalFormat.format(executionTimes[i])));
+				LOGGER.info(String.format("\t%d: %s sec", i + 1, decimalFormat.format(executionTimes[i])));
 			}
 			LOGGER.info("All tests completed successfully");
 		}
