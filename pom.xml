@@ -6,7 +6,7 @@
 
     <groupId>com.spark.etl</groupId>
     <artifactId>java_benchmark</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
 
     <name>java_benchmark</name>
 
