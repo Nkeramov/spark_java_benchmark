@@ -71,6 +71,7 @@ When executing each query, the data set was first read, and then the records wer
 For each request, 10 repetitions are performed, then the request execution time is averaged. The spark cache is cleared before each query execution.
 
 ## Results
+All results are logged to a file.
 
 Of course, the query execution time will depend primarily on the resources of your machine. On my machine I got the following results (8 worker threads, 2gb memory per executor):
 
