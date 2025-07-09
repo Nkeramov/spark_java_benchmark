@@ -16,30 +16,26 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Date;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Function;
 
 import static java.lang.Math.*;
 import static org.apache.spark.sql.functions.*;
 
 public class Main {
-    public static final String FS_SEPARATOR = FileSystems.getDefault().getSeparator();
-    private static final Logger LOGGER = LogManager.getLogger(Main.class);
+    private static final String FS_SEPARATOR = FileSystems.getDefault().getSeparator();
     private static final String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss";
     private static final String CSV_DELIMITER = ",";
-    private static final String DATASET_NAME = "opensky";
+    private static final String DATASET_NAME = "_opensky";
     private static final String CSV_PATH = System.getProperty("user.home") + FS_SEPARATOR + DATASET_NAME;
-    private static final String PARQUET_PATH = System.getProperty("user.home") + FS_SEPARATOR + DATASET_NAME +
-            FS_SEPARATOR + DATASET_NAME + ".parquet";
+    private static final String PARQUET_PATH = CSV_PATH + FS_SEPARATOR + DATASET_NAME + ".parquet";
     private static final int TEST_REPEAT_COUNT = 10;
-    private static final int TEST_TYPES_COUNT = 5;
+    private static final int TEST_QUERIES_COUNT = 5;
     private static final int WINDOW_SIZE_IN_DAYS = 30;
     private static final int DOUBLE_PRECISION = 5;
     private static final int EARTH_RADIUS = 6_371_000;
-    private static final double DEG2RAD = 180 / PI;
+
+    private static final Logger Logger = LogManager.getLogger(Main.class);
 
     /**
      * createParquetDataset - read dataset from CSV files, duplicate data with time offset (3 and 6 years)
@@ -127,37 +123,38 @@ public class Main {
 
     public static void main(String[] args) {
         DecimalFormat decimalFormat = new DecimalFormat("###,###.#");
-        System.setProperty("log4j2.configurationFile",
-                String.valueOf(Main.class.getClassLoader().getResource("log4j2.xml")));
+        System.setProperty("log4j.configurationFile",
+                Objects.requireNonNull(Main.class.getClassLoader().getResource("log4j2.xml")).getPath());
+        System.out.println(System.getProperty("log4j.configurationFile"));
         SparkSession spark = SparkSession.builder()
                 .config("spark.sql.files.ignoreCorruptFiles", "true")
+                .config("spark.executor.memory", "2g")
                 .appName("SparkJavaTest")
                 .master("local[8]")
-                .config("spark.executor.memory", "2g")
                 .getOrCreate();
+
         spark.sparkContext().setLogLevel("ERROR");
         if (Files.isDirectory(Paths.get(CSV_PATH))) {
-            LOGGER.info("Spark Java API benchmark");
-            LOGGER.info("Query list:");
-            LOGGER.info("1: reading with filtering");
-            LOGGER.info("2: reading with aggregation");
-            LOGGER.info("3: reading with aggregation and then filtering");
-            LOGGER.info("4: reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
-            LOGGER.info("5: reading and calculating the maximum of a complex function (with UDF) in a sliding window");
-            LOGGER.info(String.format("Number of repetitions of each query: %d", TEST_REPEAT_COUNT));
+            Logger.info("Spark Java API benchmark");
+            Logger.info("Query list:");
+            Logger.info("1: reading with filtering");
+            Logger.info("2: reading with aggregation");
+            Logger.info("3: reading with aggregation and then filtering");
+            Logger.info("4: reading and calculating the maximum of a complex function (as calculated column) in a sliding window");
+            Logger.info("5: reading and calculating the maximum of a complex function (with UDF) in a sliding window");
+            Logger.info("Number of repetitions of each query: {}", TEST_REPEAT_COUNT);
             if (!Files.isDirectory(Paths.get(PARQUET_PATH))) {
-                LOGGER.info("Dataset preprocessing started ...");
+                Logger.info("Dataset in Parquet format was not found (only CSV-files found), preprocessing started ...");
                 createParquetDataset(spark, CSV_PATH, PARQUET_PATH);
-                LOGGER.info("Dataset increased in size and converted from csv to parquet files");
+                Logger.info("CSV-files successfully converted  to Parquet format, also increased the dataset size");
             }
-            LOGGER.info("Dataset reading started ...");
+            Logger.info("Dataset reading started ...");
             HashMap<String, Long> res = measureQueryExecutionTime(spark, PARQUET_PATH, Dataset::persist);
             long executionTime = res.getOrDefault("execution_time", 0L);
             long rowCount = res.getOrDefault("row_count", 0L);
-            LOGGER.info(String.format("Elapsed time %s sec, selected %s rows", decimalFormat.format(executionTime),
-                    decimalFormat.format(rowCount)));
-            LOGGER.info(String.format("Dataset schema: \n%s",
-                    readParquetDataset(spark, PARQUET_PATH).schema().treeString()));
+            Logger.info("Elapsed time {} sec, selected {} rows", decimalFormat.format(executionTime),
+                    decimalFormat.format(rowCount));
+            Logger.info("Dataset schema: \n{}", readParquetDataset(spark, PARQUET_PATH).schema().treeString());
             spark.catalog().clearCache();
             List<Function<Dataset<Row>, Dataset<Row>>> spark_queries = new ArrayList<>();
             spark_queries.add(df -> df
@@ -190,14 +187,14 @@ public class Main {
             spark_queries.add(df -> df
                     .withColumn("distance_km", round(
                             lit(2 * EARTH_RADIUS).multiply(asin(sqrt(
-                                    pow(sin((col("latitude_2").divide(lit(DEG2RAD))
-                                            .minus(col("latitude_1").divide(lit(DEG2RAD))))
+                                    pow(sin((radians(col("latitude_2"))
+                                            .minus(radians(col("latitude_1"))))
                                             .divide(lit(2.0))), 2.0)
-                                            .plus(cos(col("latitude_1").divide(lit(DEG2RAD)))
-                                                    .multiply(cos(col("latitude_2").divide(lit(DEG2RAD))))
+                                            .plus(cos(radians(col("latitude_1")))
+                                                    .multiply(cos(radians(col("latitude_2"))))
                                                     .multiply(pow(
-                                                            sin((col("longitude_2").divide(lit(DEG2RAD))
-                                                                    .minus(col("longitude_1").divide(lit(DEG2RAD))))
+                                                            sin((radians(col("longitude_2"))
+                                                                    .minus(radians(col("longitude_1"))))
                                                                     .divide(lit(2.0))), 2.0)
                                                     )
                                             )
@@ -230,27 +227,27 @@ public class Main {
                             .over(ws4).as("max_distance_km_on_date"))
                     .orderBy(col("flightdate").asc())
             );
-            long[] executionTimes = new long[TEST_TYPES_COUNT];
+            long[] executionTimes = new long[TEST_QUERIES_COUNT];
             for (int i = 0; i < TEST_REPEAT_COUNT; i++) {
-                LOGGER.info(String.format("%d iteration", i + 1));
+                Logger.info("{} iteration", i + 1);
                 for (int j = 0; j < spark_queries.size(); j++) {
                     Function<Dataset<Row>, Dataset<Row>> spark_query = spark_queries.get(j);
                     res = measureQueryExecutionTime(spark, PARQUET_PATH, spark_query);
                     executionTime = res.getOrDefault("execution_time", 0L);
                     rowCount = res.getOrDefault("row_count", 0L);
-                    LOGGER.info(String.format("\t%d: elapsed time %s sec, selected %s rows", j + 1,
-                            decimalFormat.format(executionTime), decimalFormat.format(rowCount)));
+                    Logger.info("\t{}: elapsed time {} sec, selected {} rows", j + 1,
+                            decimalFormat.format(executionTime), decimalFormat.format(rowCount));
                     executionTimes[j] += executionTime;
                 }
             }
-            LOGGER.info("Average query execution time");
+            Logger.info("Average query execution time");
             for (int i = 0; i < executionTimes.length; i++) {
                 executionTimes[i] = round((double) executionTimes[i] / TEST_REPEAT_COUNT);
-                LOGGER.info(String.format("\t%d: %s sec", i + 1, decimalFormat.format(executionTimes[i])));
+                Logger.info("\t{}: {} sec", i + 1, decimalFormat.format(executionTimes[i]));
             }
-            LOGGER.info("All tests completed successfully");
+            Logger.info("All tests completed successfully");
         } else {
-            LOGGER.error("Dataset files not found");
+            Logger.error("Dataset files not found");
         }
         spark.stop();
     }
